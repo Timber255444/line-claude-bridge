@@ -82,10 +82,14 @@ async def webhook(request: Request, x_line_signature: str = Header(...)):
         raise HTTPException(status_code=400, detail="Invalid signature")
 
     data = await request.json()
+    print(f"[WEBHOOK] events={len(data.get('events', []))}")
     for event in data.get("events", []):
         source = event.get("source", {})
         group_id = source.get("groupId") or source.get("roomId") or "direct"
         user_id = source.get("userId", "unknown")
+        event_type = event.get("type")
+        msg_type = event.get("message", {}).get("type") if event_type == "message" else "-"
+        print(f"[EVENT] type={event_type} user={user_id[:12] if user_id != 'unknown' else 'unknown'} group={group_id[:12] if group_id != 'direct' else 'direct'} msg_type={msg_type}")
 
         # joinイベントでグループ名を取得・保存
         if event.get("type") == "join" and group_id != "direct":
