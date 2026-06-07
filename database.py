@@ -35,6 +35,13 @@ def init_db():
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_group ON messages(group_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_ts ON messages(timestamp)")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS groups (
+                    group_id TEXT PRIMARY KEY,
+                    group_name TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
 
 
 def save_message(group_id: str, user_id: str, text: str, timestamp: datetime):
@@ -44,6 +51,24 @@ def save_message(group_id: str, user_id: str, text: str, timestamp: datetime):
                 "INSERT INTO messages (group_id, user_id, text, timestamp) VALUES (%s, %s, %s, %s)",
                 (group_id, user_id, text, timestamp.isoformat()),
             )
+
+
+def save_group_name(group_id: str, group_name: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO groups (group_id, group_name, updated_at)
+                   VALUES (%s, %s, NOW())
+                   ON CONFLICT (group_id) DO UPDATE SET group_name=EXCLUDED.group_name, updated_at=NOW()""",
+                (group_id, group_name),
+            )
+
+
+def get_groups() -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT group_id, group_name FROM groups")
+            return {row[0]: row[1] for row in cur.fetchall()}
 
 
 def get_recent_messages(limit: int = 50, group_id: str = None) -> list[dict]:
