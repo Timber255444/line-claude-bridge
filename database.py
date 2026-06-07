@@ -42,6 +42,13 @@ def init_db():
                     updated_at TIMESTAMP DEFAULT NOW()
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
 
 
 def save_message(group_id: str, user_id: str, text: str, timestamp: datetime):
@@ -62,6 +69,24 @@ def save_group_name(group_id: str, group_name: str):
                    ON CONFLICT (group_id) DO UPDATE SET group_name=EXCLUDED.group_name, updated_at=NOW()""",
                 (group_id, group_name),
             )
+
+
+def save_user_name(user_id: str, display_name: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO users (user_id, display_name, updated_at)
+                   VALUES (%s, %s, NOW())
+                   ON CONFLICT (user_id) DO UPDATE SET display_name=EXCLUDED.display_name, updated_at=NOW()""",
+                (user_id, display_name),
+            )
+
+
+def get_users() -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id, display_name FROM users")
+            return {row[0]: row[1] for row in cur.fetchall()}
 
 
 def get_groups() -> dict:

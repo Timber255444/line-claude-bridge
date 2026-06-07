@@ -6,7 +6,10 @@ import httpx
 from datetime import datetime
 from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.responses import JSONResponse
-from database import init_db, save_message, query_messages, get_recent_messages, save_group_name, get_groups
+from database import (
+    init_db, save_message, query_messages, get_recent_messages,
+    save_group_name, get_groups, save_user_name, get_users,
+)
 
 app = FastAPI()
 
@@ -40,6 +43,28 @@ async def fetch_group_name(group_id: str) -> str:
     return group_id
 
 
+async def fetch_user_name(user_id: str, group_id: str) -> str:
+    if not LINE_CHANNEL_ACCESS_TOKEN:
+        return user_id
+    try:
+        async with httpx.AsyncClient() as client:
+            url = (
+                f"https://api.line.me/v2/bot/group/{group_id}/member/{user_id}"
+                if group_id != "direct"
+                else f"https://api.line.me/v2/bot/profile/{user_id}"
+            )
+            r = await client.get(
+                url,
+                headers={"Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"},
+                timeout=5,
+            )
+            if r.status_code == 200:
+                return r.json().get("displayName", user_id)
+    except Exception:
+        pass
+    return user_id
+
+
 @app.on_event("startup")
 async def startup():
     init_db()
@@ -55,6 +80,7 @@ async def webhook(request: Request, x_line_signature: str = Header(...)):
     for event in data.get("events", []):
         source = event.get("source", {})
         group_id = source.get("groupId") or source.get("roomId") or "direct"
+        user_id = source.get("userId", "unknown")
 
         # joinイベントでグループ名を取得・保存
         if event.get("type") == "join" and group_id != "direct":
@@ -74,9 +100,15 @@ async def webhook(request: Request, x_line_signature: str = Header(...)):
                 name = await fetch_group_name(group_id)
                 save_group_name(group_id, name)
 
+        # ユーザー名が未登録なら取得
+        users = get_users()
+        if user_id not in users:
+            display_name = await fetch_user_name(user_id, group_id)
+            save_user_name(user_id, display_name)
+
         save_message(
             group_id=group_id,
-            user_id=source.get("userId", "unknown"),
+            user_id=user_id,
             text=msg["text"],
             timestamp=datetime.fromtimestamp(event["timestamp"] / 1000),
         )
@@ -89,24 +121,25 @@ def _require_api_key(key: str):
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
+def _enrich(rows: list[dict]) -> list[dict]:
+    groups = get_groups()
+    users = get_users()
+    for r in rows:
+        r["group_name"] = groups.get(r["group_id"], r["group_id"])
+        r["display_name"] = users.get(r["user_id"], r["user_id"])
+    return rows
+
+
 @app.get("/messages/recent")
 async def recent(limit: int = 50, group_id: str = None, x_api_key: str = Header(...)):
     _require_api_key(x_api_key)
-    rows = get_recent_messages(limit=limit, group_id=group_id)
-    groups = get_groups()
-    for r in rows:
-        r["group_name"] = groups.get(r["group_id"], r["group_id"])
-    return {"messages": rows}
+    return {"messages": _enrich(get_recent_messages(limit=limit, group_id=group_id))}
 
 
 @app.get("/messages/search")
 async def search(q: str, group_id: str = None, x_api_key: str = Header(...)):
     _require_api_key(x_api_key)
-    rows = query_messages(keyword=q, group_id=group_id)
-    groups = get_groups()
-    for r in rows:
-        r["group_name"] = groups.get(r["group_id"], r["group_id"])
-    return {"messages": rows}
+    return {"messages": _enrich(query_messages(keyword=q, group_id=group_id))}
 
 
 @app.get("/groups")
