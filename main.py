@@ -65,6 +65,11 @@ async def fetch_user_name(user_id: str, group_id: str) -> str:
     return user_id
 
 
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
 @app.on_event("startup")
 async def startup():
     init_db()
