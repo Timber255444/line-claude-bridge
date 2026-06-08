@@ -5,6 +5,7 @@ import base64
 import httpx
 from datetime import datetime
 from fastapi import FastAPI, Request, HTTPException, Header
+from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 from database import (
     init_db, save_message, query_messages, get_recent_messages,
@@ -123,6 +124,34 @@ async def webhook(request: Request, x_line_signature: str = Header(...)):
         )
 
     return JSONResponse({"status": "ok"})
+
+
+class SendRequest(BaseModel):
+    group_id: str
+    text: str
+
+
+@app.post("/send")
+async def send_message(body: SendRequest, x_api_key: str = Header(...)):
+    _require_api_key(x_api_key)
+    if not LINE_CHANNEL_ACCESS_TOKEN:
+        raise HTTPException(status_code=500, detail="LINE_CHANNEL_ACCESS_TOKEN not set")
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            "https://api.line.me/v2/bot/message/push",
+            headers={
+                "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "to": body.group_id,
+                "messages": [{"type": "text", "text": body.text}],
+            },
+            timeout=10,
+        )
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"LINE API error: {r.text}")
+    return {"status": "sent"}
 
 
 def _require_api_key(key: str):
